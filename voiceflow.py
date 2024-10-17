@@ -1,4 +1,6 @@
 import os
+import fcntl
+import re
 import tempfile
 import threading
 import time
@@ -7,21 +9,18 @@ import logging
 from logging.handlers import RotatingFileHandler
 import subprocess
 import sys
-from datetime import datetime
-import httpx
 import ffmpeg
 import pyaudio
 import pyperclip
 import requests
-from PIL import Image
 from pynput import keyboard
-# from pystray import Icon as icon, Menu as menu, MenuItem as item
 from groq import Groq
 from deepgram import (
     DeepgramClient,
     PrerecordedOptions,
     FileSource,
 )
+
 
 # Set up logging
 log_file = 'voiceflow.log'
@@ -30,7 +29,7 @@ log_handler = RotatingFileHandler(log_file, maxBytes=1024*1024, backupCount=5)
 log_handler.setFormatter(log_formatter)
 
 logger = logging.getLogger('voiceflow')
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.DEBUG)
 logger.addHandler(log_handler)
 
 # Add a stream handler for console output when not running in the background
@@ -52,54 +51,46 @@ GROQ_API_KEY = os.environ.get('GROQ_API_KEY', '')
 DEEPGRAM_API_KEY = os.environ.get('DEEPGRAM_API_KEY', '')
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
 
+# Debug logging for API keys
+logger.debug(f"GROQ_API_KEY: {'set' if GROQ_API_KEY else 'not set'}")
+logger.debug(f"DEEPGRAM_API_KEY: {'set' if DEEPGRAM_API_KEY else 'not set'}")
+logger.debug(f"OPENAI_API_KEY: {'set' if OPENAI_API_KEY else 'not set'}")
+
 # Global variables
 is_recording = False
 p = pyaudio.PyAudio()
 frames = []
-# tray_icon = None
+alt_pressed = False
 
 
 def on_press(key):
-    """
-    Handle key press events.
-
-    Start recording when Alt + T are pressed simultaneously.
-    """
-    global is_recording, frames
+    global is_recording, frames, alt_pressed
     try:
-        if key == keyboard.Key.alt_l and keyboard.KeyCode.from_char('t'):
-            if not is_recording:
-                is_recording = True
-                frames = []
-                threading.Thread(target=record_audio).start()
-                # update_icon("Recording")  # Comment out or remove this line
+        if key == keyboard.Key.alt:
+            alt_pressed = True
+        elif key.char == 't' and alt_pressed and not is_recording:
+            is_recording = True
+            frames = []
+            threading.Thread(target=record_audio).start()
+            logger.info("Recording started")
     except AttributeError:
         pass
 
 
 def on_release(key):
-    """
-    Handle key release events.
-
-    Stop recording when either Alt or T is released.
-    """
-    global is_recording
+    global is_recording, alt_pressed
     try:
-        if key == keyboard.Key.alt_l or key == keyboard.KeyCode.from_char('t'):
-            if is_recording:
-                is_recording = False
-                # update_icon("Idle")  # Comment out or remove this line
-                process_audio()
+        if key == keyboard.Key.alt:
+            alt_pressed = False
+        if (key == keyboard.Key.alt or key.char == 't') and is_recording:
+            is_recording = False
+            logger.info("Recording stopped")
+            process_audio()
     except AttributeError:
         pass
 
 
 def record_audio():
-    """
-    Record audio from the microphone and store it in frames.
-
-    Recording continues until is_recording is False or MAX_RECORD_SECONDS is reached.
-    """
     global is_recording, frames
     try:
         stream = p.open(format=FORMAT, channels=CHANNELS, rate=RATE,
@@ -124,13 +115,6 @@ def record_audio():
 
 
 def process_audio():
-    """
-    Process the recorded audio.
-
-    This function saves the audio to a temporary file,
-    preprocesses it, transcribes it, processes the transcription with AI,
-    and outputs the result.
-    """
     global frames
     logger.info("Starting audio processing")
 
@@ -150,6 +134,15 @@ def process_audio():
             file_size = os.path.getsize(temp_file_name)
             logger.info(f"Audio data written to temporary file. File size: {
                         file_size} bytes")
+
+        # Check if the recording is at least 1 second long
+        if len(frames) < RATE / CHUNK:
+            logger.info(
+                "Recording too short (less than 1 second). Discarding.")
+            return
+
+        logger.info(f"Recording length: {
+                    len(frames) * CHUNK / RATE:.2f} seconds")
 
         # Preprocess audio (downsample to 16kHz)
         try:
@@ -172,9 +165,10 @@ def process_audio():
             raise Exception("Transcription failed")
 
         logger.info(f"Transcription result: {transcription}")
+        print(f"Transcription: {transcription}")  # Console output
 
-        # Process transcription with AI (you can implement this part later)
-        processed_text = transcription  # For now, just use the transcription as is
+        # Process transcription with AI
+        processed_text = process_transcription(transcription)
 
         # Output processed text
         pyperclip.copy(processed_text)
@@ -269,6 +263,12 @@ def process_transcription(transcription):
 
     Returns the processed text or None if both APIs fail.
     """
+    prompt = f"For the given transcription with unclear and incorrect grammar, spelling and capitalization, return a cleaned text that is the exact representation of the transcript but in a written form with correct grammar, spelling, capitalization, etc. Do not add any additional text or comments. Do not give me multiple options. ONLY output the cleaned text. <TRANSCRIPT>{
+        transcription}</TRANSCRIPT>"
+
+    logger.info(f"Prompt for LLM: {prompt}")
+    print(f"Prompt for LLM: {prompt}")  # Console output
+
     # Try Groq API first
     try:
         response = requests.post(
@@ -278,36 +278,48 @@ def process_transcription(transcription):
                 "model": "llama-3.1-8b-instant",
                 "messages": [
                     {"role": "system", "content": "You are a helpful assistant that improves transcriptions."},
-                    {"role": "user", "content": f"For the given transcription with unclear and incorrect grammar, spelling and capitalization, return a cleaned text that is the exact representation of the transcript but in a written form with correct grammar, spelling, capitalization, etc. <TRANSCRIPT>{transcription}</TRANSCRIPT>"}
+                    {"role": "user", "content": prompt}
                 ]
             },
             timeout=30
         )
         response.raise_for_status()
-        return response.json()['choices'][0]['message']['content']
+        processed_text = response.json()['choices'][0]['message']['content']
     except requests.RequestException as e:
         logger.error("Groq API error: %s", e)
+        # Fallback to OpenAI API
+        try:
+            response = requests.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+                json={
+                    "model": "gpt-4",
+                    "messages": [
+                        {"role": "system", "content": "You are a helpful assistant that improves transcriptions."},
+                        {"role": "user", "content": prompt}
+                    ]
+                },
+                timeout=30
+            )
+            response.raise_for_status()
+            processed_text = response.json(
+            )['choices'][0]['message']['content']
+        except requests.RequestException as e:
+            logger.error("OpenAI API error: %s", e)
+            return None
 
-    # Fallback to OpenAI API
-    try:
-        response = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
-            json={
-                "model": "gpt-4",
-                "messages": [
-                    {"role": "system", "content": "You are a helpful assistant that improves transcriptions."},
-                    {"role": "user", "content": f"For the given transcription with unclear and incorrect grammar, spelling and capitalization, return a cleaned text that is the exact representation of the transcript but in a written form with correct grammar, spelling, capitalization, etc. <TRANSCRIPT>{transcription}</TRANSCRIPT>"}
-                ]
-            },
-            timeout=30
-        )
-        response.raise_for_status()
-        return response.json()['choices'][0]['message']['content']
-    except requests.RequestException as e:
-        logger.error("OpenAI API error: %s", e)
+    logger.info(f"Raw LLM output: {processed_text}")
+    print(f"Raw LLM output: {processed_text}")  # Console output
 
-    return None
+    # Check if the processed text has more than one sentence
+    sentences = re.split(r'(?<=[.!?])\s+', processed_text.strip())
+    if len(sentences) > 1:
+        processed_text += '\n'  # Add an extra newline if there's more than one sentence
+
+    logger.info(f"Final processed text: {processed_text}")
+    print(f"Final processed text: {processed_text}")  # Console output
+
+    return processed_text
 
 
 # def create_image():
@@ -364,6 +376,7 @@ def quit_app():
 def insert_text_into_active_window(text):
     """Insert the processed text into the active window using xclip and xdotool."""
     try:
+        logger.info(f"Attempting to paste text: {text}")
         # Copy the text to clipboard
         subprocess.run(['xclip', '-selection', 'clipboard'],
                        input=text.encode('utf-8'), check=True)
@@ -413,26 +426,41 @@ def check_permissions():
 #         return False
 
 
+def obtain_lock():
+    lock_file = open("/tmp/voiceflow.lock", "w")
+    try:
+        fcntl.lockf(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except IOError:
+        print("Another instance is already running. Exiting.")
+        sys.exit(1)
+    return lock_file
+
+
 if __name__ == "__main__":
+    lock = obtain_lock()
     logger.info("Starting VoiceFlow")
     if not check_permissions():
         logger.error(
             "Error: Insufficient permissions. Please check the log file for details.")
         sys.exit(1)
 
-    # if not check_tray_support():
-    #     logger.warning(
-    #         "Warning: Tray icon not supported. The application will run without a visible icon.")
-
-    # threading.Thread(target=setup_tray_icon).start()  # Comment out or remove this line
-
-    with keyboard.Listener(on_press=on_press, on_release=on_release) as listener:
-        try:
-            listener.join()
-        except Exception as e:
-            logger.error(f"Error in keyboard listener: {e}")
-
     if not all([GROQ_API_KEY, DEEPGRAM_API_KEY, OPENAI_API_KEY]):
         logger.error(
             "One or more required API keys are missing. Please set all required environment variables.")
         sys.exit(1)
+
+    # Set up the keyboard listener
+    listener = keyboard.Listener(on_press=on_press, on_release=on_release)
+    listener.start()
+    logger.info(
+        "Keyboard listener started. Press Alt+T to start/stop recording.")
+
+    try:
+        # Keep the script running
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        logger.info("Keyboard interrupt received. Exiting...")
+    finally:
+        listener.stop()
+        logger.info("Keyboard listener stopped.")
