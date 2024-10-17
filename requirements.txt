@@ -14,5 +14,4 @@ requests==2.32.3
 six==1.16.0
 urllib3==2.2.3
 groq==0.11.0
-deepgram-sdk==2.12.0
-httpx==0.26.0
+deepgram-sdk==3.7.3
