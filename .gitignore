@@ -2,6 +2,8 @@ venv
 
 voiceflow.log
 
+run_voiceflow.sh
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
