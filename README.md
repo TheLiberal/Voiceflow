@@ -60,3 +60,67 @@ VoiceFlow requires access to the microphone and the ability to write temporary f
 ## Tray Icon Support
 
 VoiceFlow attempts to create a tray icon for easy access. If your system doesn't support tray icons, the application will still run but without a visible icon. You can still use the hotkey functionality.
+
+## Setting up VoiceFlow as a System Service
+
+After making changes to the VoiceFlow script, follow these steps to set it up as a system service:
+
+1. Create a systemd service file:
+
+   ```bash
+   sudo nano /etc/systemd/system/voiceflow.service
+   ```
+
+2. Add the following content to the file (replace `yourusername` with your actual username and add your API keys):
+
+   ```ini
+   [Unit]
+   Description=VoiceFlow Audio Transcription Tool
+   After=network.target
+
+   [Service]
+   ExecStart=/home/yourusername/Documents/Projects/Voiceflow/venv/bin/python /home/yourusername/Documents/Projects/Voiceflow/voiceflow.py
+   Environment=DISPLAY=:1
+   Environment=XAUTHORITY=/home/yourusername/.Xauthority
+   Environment=GROQ_API_KEY=your_groq_api_key
+   Environment=DEEPGRAM_API_KEY=your_deepgram_api_key
+   Environment=OPENAI_API_KEY=your_openai_api_key
+   Restart=always
+   User=yourusername
+
+   [Install]
+   WantedBy=multi-user.target
+   ```
+
+3. Save and exit the editor.
+
+4. Reload the systemd daemon:
+
+   ```bash
+   sudo systemctl daemon-reload
+   ```
+
+5. Enable the service to start on boot:
+
+   ```bash
+   sudo systemctl enable voiceflow.service
+   ```
+
+6. Start the service:
+
+   ```bash
+   sudo systemctl start voiceflow.service
+   ```
+
+7. Check the status of the service:
+
+   ```bash
+   sudo systemctl status voiceflow.service
+   ```
+
+8. To view logs:
+   ```bash
+   sudo journalctl -u voiceflow.service
+   ```
+
+After completing these steps, VoiceFlow will run as a system service and start automatically on boot. You can use the hotkey combination to activate it without needing to manually start the script.
