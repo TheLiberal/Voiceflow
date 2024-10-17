@@ -1,0 +1,11 @@
+[Unit]
+Description=VoiceFlow Audio Transcription Tool
+After=network.target
+
+[Service]
+ExecStart=/home/yourusername/voiceflow/venv/bin/python /home/yourusername/voiceflow/voiceflow.py
+Restart=always
+User=yourusername
+
+[Install]
+WantedBy=multi-user.target
