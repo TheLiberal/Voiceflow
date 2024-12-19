@@ -1,0 +1,23 @@
+# Core dependencies
+ffmpeg-python
+PyAudio
+pyperclip
+requests
+pynput
+python-dotenv
+
+# Additional dependencies from your existing setup
+certifi
+charset-normalizer
+deepgram-sdk
+evdev
+future
+groq
+idna
+pillow
+python-xlib
+six
+urllib3
+
+# Development dependencies
+ruff

@@ -1,0 +1,29 @@
+[project]
+name = "voiceflow"
+version = "0.1.0"
+description = "Voice-to-text transcription and processing tool"
+readme = "README.md"
+requires-python = ">=3.10"
+
+[tool.ruff]
+line-length = 120
+indent-width = 4
+
+[tool.ruff.lint]
+select = [
+    "E",  # pycodestyle errors
+    "F",  # pyflakes
+    "I",  # isort
+    "B",  # flake8-bugbear
+]
+ignore = ["E501"]  # Ignore line length errors completely
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.ruff.isort]
+known-first-party = ["voiceflow"]
+combine-as-imports = true

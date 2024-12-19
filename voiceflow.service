@@ -1,0 +1,23 @@
+[Unit]
+Description=VoiceFlow Voice Transcription Service
+After=network.target graphical-session.target
+
+[Service]
+Type=simple
+User=blaise
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/blaise/.Xauthority
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=PULSE_SERVER=unix:/run/user/1000/pulse/native
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+Environment=FIREWORKS_API_KEY=
+Environment=CEREBRAS_API_KEY=
+Environment=GROQ_API_KEY=
+Environment=OPENAI_API_KEY=
+ExecStart=/home/blaise/Documents/Projects/Voiceflow/.venv/bin/python3 /home/blaise/Documents/Projects/Voiceflow/voiceflow.py
+WorkingDirectory=/home/blaise/Documents/Projects/Voiceflow
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target 
